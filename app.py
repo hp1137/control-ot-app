@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-# Configuración de página
+# Configuración de la página
 st.set_page_config(
     page_title="Control de Órdenes de Trabajo - Corte y Repo",
     page_icon="🛠️",
@@ -12,28 +12,36 @@ st.set_page_config(
 st.title("🛠️ Control y Verificación de Órdenes de Trabajo")
 st.write("Gestiona la verificación de direcciones ejecutadas y pendientes a partir del registro del servicio.")
 
-# Cargar archivo Excel
+# Cargar archivo Excel desde la barra lateral
 uploaded_file = st.sidebar.file_uploader("Cargar archivo 'corte y repo.xlsx'", type=["xlsx"])
 
 @st.cache_data
 def load_data(file):
-    # Leer el archivo Excel para inspeccionar los nombres de las hojas
     xls = pd.ExcelFile(file)
+    df = None
     
-    # Seleccionar la pestaña (Hoja2 o la primera disponible)
-    sheet_to_use = 'Hoja2' if 'Hoja2' in xls.sheet_names else xls.sheet_names[0]
-    
-    # Cargar los datos
-    df = pd.read_excel(xls, sheet_name=sheet_to_use)
-    
-    # Si el encabezado está en la fila 2
-    if 'Número OT' not in df.columns and len(df) > 0:
-        df = pd.read_excel(xls, sheet_name=sheet_to_use, header=1)
+    # 1. Buscar automáticamente la hoja y la fila que contiene los encabezados
+    for sheet in xls.sheet_names:
+        temp_df = pd.read_excel(xls, sheet_name=sheet, header=None)
+        for idx, row in temp_df.iterrows():
+            row_str = row.astype(str).str.lower().tolist()
+            if any('número ot' in cell or 'numero ot' in cell or 'dirección' in cell or 'direccion' in cell for cell in row_str):
+                df = pd.read_excel(xls, sheet_name=sheet, header=idx)
+                break
+        if df is not None:
+            break
+            
+    # Si no se encontró por palabra clave, cargar la primera pestaña normalmente
+    if df is None:
+        df = pd.read_excel(xls, sheet_name=xls.sheet_names[0])
         
-    # Limpieza de columnas vacías
-    df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+    # Limpiar espacios extra en los nombres de las columnas
+    df.columns = [str(c).strip() for c in df.columns]
     
-    # Inicializar columnas de verificación
+    # Eliminar columnas vacías tipo 'Unnamed'
+    df = df.loc[:, ~df.columns.str.contains('^Unnamed', case=False, na=False)]
+    
+    # Inicializar columnas de verificación si no existen
     if 'Estado Verificación' not in df.columns:
         df['Estado Verificación'] = 'Pendiente'
     if 'Observación Verificador' not in df.columns:
@@ -58,27 +66,35 @@ if uploaded_file is not None:
         default=['Pendiente', 'Ejecutada']
     )
     
-    tipos_ot = st.sidebar.multiselect(
-        "Tipo de OT:",
-        options=st.session_state.data['Tipo OT'].dropna().unique(),
-        default=st.session_state.data['Tipo OT'].dropna().unique()
-    )
+    # Obtener tipos de OT si existe la columna
+    col_tipo_ot = 'Tipo OT' if 'Tipo OT' in st.session_state.data.columns else ('Tipo de trabajo' if 'Tipo de trabajo' in st.session_state.data.columns else None)
+    
+    if col_tipo_ot:
+        tipos_ot = st.sidebar.multiselect(
+            "Tipo de OT:",
+            options=st.session_state.data[col_tipo_ot].dropna().unique(),
+            default=st.session_state.data[col_tipo_ot].dropna().unique()
+        )
+    else:
+        tipos_ot = []
 
     search_query = st.sidebar.text_input("Buscar por Dirección, OT o Cliente:")
 
     # Aplicar filtros
     filtered_df = st.session_state.data[
-        (st.session_state.data['Estado Verificación'].isin(estado_filtro)) &
-        (st.session_state.data['Tipo OT'].isin(tipos_ot))
+        st.session_state.data['Estado Verificación'].isin(estado_filtro)
     ]
+    
+    if col_tipo_ot and tipos_ot:
+        filtered_df = filtered_df[filtered_df[col_tipo_ot].isin(tipos_ot)]
 
     if search_query:
         query = search_query.lower()
-        filtered_df = filtered_df[
-            filtered_df['Dirección'].astype(str).str.lower().str.contains(query) |
-            filtered_df['Número OT'].astype(str).str.lower().str.contains(query) |
-            filtered_df['Cliente'].astype(str).str.lower().str.contains(query)
-        ]
+        cond = pd.Series(False, index=filtered_df.index)
+        for col in ['Dirección', 'Número OT', 'Cliente']:
+            if col in filtered_df.columns:
+                cond = cond | filtered_df[col].astype(str).str.lower().str.contains(query, na=False)
+        filtered_df = filtered_df[cond]
 
     # --- PANEL DE MÉTRICAS ---
     total_registros = len(st.session_state.data)
@@ -98,32 +114,35 @@ if uploaded_file is not None:
     st.subheader("📋 Registro de Dirección y Estado de Órdenes")
     st.caption("Puedes cambiar el estado de **Pendiente** a **Ejecutada** e ingresar observaciones directamente en la tabla.")
 
-    columns_to_show = [
-        'Número OT', 'Cliente', 'Dirección', 'Tipo OT', 
+    # Definir columnas a mostrar de forma segura
+    expected_cols = [
+        'Número OT', 'Cliente', 'Dirección', 'Tipo OT', 'Tipo de trabajo',
         'F. Culminación', 'Obs. del Operario', 
         'Estado Verificación', 'Observación Verificador'
     ]
+    
+    columns_to_show = [c for c in expected_cols if c in filtered_df.columns]
+
+    # Configuración de columnas para el editor
+    config_dict = {
+        "Estado Verificación": st.column_config.SelectboxColumn(
+            "Estado",
+            options=["Pendiente", "Ejecutada"],
+            required=True,
+        ),
+        "Observación Verificador": st.column_config.TextColumn(
+            "Obs. Verificador",
+            help="Escribe comentarios o aclaraciones de la verificación"
+        )
+    }
+
+    # Deshabilitar edición en columnas que no sean de verificación
+    disabled_cols = [c for c in columns_to_show if c not in ['Estado Verificación', 'Observación Verificador']]
 
     edited_df = st.data_editor(
         filtered_df[columns_to_show],
-        column_config={
-            "Estado Verificación": st.column_config.SelectboxColumn(
-                "Estado",
-                options=["Pendiente", "Ejecutada"],
-                required=True,
-            ),
-            "Observación Verificador": st.column_config.TextColumn(
-                "Obs. Verificador",
-                help="Escribe comentarios o aclaraciones de la verificación"
-            ),
-            "Número OT": st.column_config.TextColumn("N° OT", disabled=True),
-            "Cliente": st.column_config.TextColumn("Cliente", disabled=True),
-            "Dirección": st.column_config.TextColumn("Dirección", disabled=True),
-            "Tipo OT": st.column_config.TextColumn("Tipo OT", disabled=True),
-            "F. Culminación": st.column_config.DatetimeColumn("F. Culminación", disabled=True),
-            "Obs. del Operario": st.column_config.TextColumn("Obs. Operario", disabled=True),
-        },
-        disabled=["Número OT", "Cliente", "Dirección", "Tipo OT", "F. Culminación", "Obs. del Operario"],
+        column_config=config_dict,
+        disabled=disabled_cols,
         hide_index=True,
         use_container_width=True,
         key="data_editor"
