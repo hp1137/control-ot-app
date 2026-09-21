@@ -20,18 +20,23 @@ def load_data(file):
     xls = pd.ExcelFile(file)
     df = None
     
-    # 1. Buscar automáticamente la hoja y la fila que contiene los encabezados
+    # Buscar automáticamente la hoja y la fila que contiene los encabezados reales
     for sheet in xls.sheet_names:
-        temp_df = pd.read_excel(xls, sheet_name=sheet, header=None)
-        for idx, row in temp_df.iterrows():
-            row_str = row.astype(str).str.lower().tolist()
-            if any('número ot' in cell or 'numero ot' in cell or 'dirección' in cell or 'direccion' in cell for cell in row_str):
-                df = pd.read_excel(xls, sheet_name=sheet, header=idx)
+        temp = pd.read_excel(xls, sheet_name=sheet, header=None)
+        
+        header_idx = None
+        for idx, row in temp.iterrows():
+            # Convertir toda la fila a un texto seguro en minúsculas
+            row_text = " ".join([str(val).lower() for val in row.values if pd.notna(val)])
+            if any(k in row_text for k in ['número ot', 'numero ot', 'dirección', 'direccion', 'cliente']):
+                header_idx = idx
                 break
-        if df is not None:
+                
+        if header_idx is not None:
+            df = pd.read_excel(xls, sheet_name=sheet, header=header_idx)
             break
             
-    # Si no se encontró por palabra clave, cargar la primera pestaña normalmente
+    # Si no se encontró la palabra clave, cargar la primera pestaña normalmente
     if df is None:
         df = pd.read_excel(xls, sheet_name=xls.sheet_names[0])
         
@@ -66,7 +71,6 @@ if uploaded_file is not None:
         default=['Pendiente', 'Ejecutada']
     )
     
-    # Obtener tipos de OT si existe la columna
     col_tipo_ot = 'Tipo OT' if 'Tipo OT' in st.session_state.data.columns else ('Tipo de trabajo' if 'Tipo de trabajo' in st.session_state.data.columns else None)
     
     if col_tipo_ot:
@@ -114,7 +118,6 @@ if uploaded_file is not None:
     st.subheader("📋 Registro de Dirección y Estado de Órdenes")
     st.caption("Puedes cambiar el estado de **Pendiente** a **Ejecutada** e ingresar observaciones directamente en la tabla.")
 
-    # Definir columnas a mostrar de forma segura
     expected_cols = [
         'Número OT', 'Cliente', 'Dirección', 'Tipo OT', 'Tipo de trabajo',
         'F. Culminación', 'Obs. del Operario', 
@@ -123,7 +126,6 @@ if uploaded_file is not None:
     
     columns_to_show = [c for c in expected_cols if c in filtered_df.columns]
 
-    # Configuración de columnas para el editor
     config_dict = {
         "Estado Verificación": st.column_config.SelectboxColumn(
             "Estado",
@@ -136,7 +138,6 @@ if uploaded_file is not None:
         )
     }
 
-    # Deshabilitar edición en columnas que no sean de verificación
     disabled_cols = [c for c in columns_to_show if c not in ['Estado Verificación', 'Observación Verificador']]
 
     edited_df = st.data_editor(
