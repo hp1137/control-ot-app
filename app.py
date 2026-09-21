@@ -17,7 +17,6 @@ uploaded_file = st.sidebar.file_uploader("Cargar archivo 'corte y repo.xlsx'", t
 
 if uploaded_file is not None:
     @st.cache_data
-    @st.cache_data
 def load_data(file):
     # Leer el archivo Excel para inspeccionar los nombres de las hojas
     xls = pd.ExcelFile(file)
