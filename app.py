@@ -17,22 +17,33 @@ uploaded_file = st.sidebar.file_uploader("Cargar archivo 'corte y repo.xlsx'", t
 
 if uploaded_file is not None:
     @st.cache_data
-    def load_data(file):
-        # Leer desde la Hoja2, omitiendo columnas vacías si existen
-        df = pd.read_excel(file, sheet_name='Hoja2')
-        # Limpieza inicial de columnas vacías de formato
-        df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+    @st.cache_data
+def load_data(file):
+    # Leer el archivo Excel para inspeccionar los nombres de las hojas
+    xls = pd.ExcelFile(file)
+    
+    # Si existe una pestaña llamada 'Hoja2', la usa; si no, toma la primera pestaña disponible
+    sheet_to_use = 'Hoja2' if 'Hoja2' in xls.sheet_names else xls.sheet_names[0]
+    
+    # Cargar los datos
+    df = pd.read_excel(xls, sheet_name=sheet_to_use)
+    
+    # Si la primera fila es un encabezado fuera de lugar, ajustamos la lectura
+    if 'Número OT' not in df.columns:
+        df = pd.read_excel(xls, sheet_name=sheet_to_use, header=1)
         
-        # Agregar columnas de gestión de verificación si no existen
-        if 'Estado Verificación' not in df.columns:
-            df['Estado Verificación'] = 'Pendiente'
-        if 'Observación Verificador' not in df.columns:
-            df['Observación Verificador'] = ''
-        if 'Fecha Verificación' not in df.columns:
-            df['Fecha Verificación'] = ''
-            
-        return df
-
+    # Limpieza de columnas vacías generadas por formato
+    df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+    
+    # Inicializar columnas de verificación
+    if 'Estado Verificación' not in df.columns:
+        df['Estado Verificación'] = 'Pendiente'
+    if 'Observación Verificador' not in df.columns:
+        df['Observación Verificador'] = ''
+    if 'Fecha Verificación' not in df.columns:
+        df['Fecha Verificación'] = ''
+        
+    return df
     df = load_data(uploaded_file)
 
     # Persistencia en session_state para permitir modificaciones
