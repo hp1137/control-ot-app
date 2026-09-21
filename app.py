@@ -15,23 +15,22 @@ st.write("Gestiona la verificación de direcciones ejecutadas y pendientes a par
 # Cargar archivo Excel
 uploaded_file = st.sidebar.file_uploader("Cargar archivo 'corte y repo.xlsx'", type=["xlsx"])
 
-if uploaded_file is not None:
-    @st.cache_data
+@st.cache_data
 def load_data(file):
     # Leer el archivo Excel para inspeccionar los nombres de las hojas
     xls = pd.ExcelFile(file)
     
-    # Si existe una pestaña llamada 'Hoja2', la usa; si no, toma la primera pestaña disponible
+    # Seleccionar la pestaña (Hoja2 o la primera disponible)
     sheet_to_use = 'Hoja2' if 'Hoja2' in xls.sheet_names else xls.sheet_names[0]
     
     # Cargar los datos
     df = pd.read_excel(xls, sheet_name=sheet_to_use)
     
-    # Si la primera fila es un encabezado fuera de lugar, ajustamos la lectura
-    if 'Número OT' not in df.columns:
+    # Si el encabezado está en la fila 2
+    if 'Número OT' not in df.columns and len(df) > 0:
         df = pd.read_excel(xls, sheet_name=sheet_to_use, header=1)
         
-    # Limpieza de columnas vacías generadas por formato
+    # Limpieza de columnas vacías
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
     
     # Inicializar columnas de verificación
@@ -43,30 +42,28 @@ def load_data(file):
         df['Fecha Verificación'] = ''
         
     return df
+
+if uploaded_file is not None:
     df = load_data(uploaded_file)
 
-    # Persistencia en session_state para permitir modificaciones
     if 'data' not in st.session_state:
         st.session_state.data = df.copy()
 
     # --- BARRA LATERAL: FILTROS ---
     st.sidebar.header("🔍 Filtros de Búsqueda")
     
-    # Filtro por Estado
     estado_filtro = st.sidebar.multiselect(
         "Estado de Verificación:",
         options=['Pendiente', 'Ejecutada'],
         default=['Pendiente', 'Ejecutada']
     )
     
-    # Filtro por Tipo de OT
     tipos_ot = st.sidebar.multiselect(
         "Tipo de OT:",
         options=st.session_state.data['Tipo OT'].dropna().unique(),
         default=st.session_state.data['Tipo OT'].dropna().unique()
     )
 
-    # Búsqueda por texto (Dirección, OT o Cliente)
     search_query = st.sidebar.text_input("Buscar por Dirección, OT o Cliente:")
 
     # Aplicar filtros
@@ -97,18 +94,16 @@ def load_data(file):
 
     st.markdown("---")
 
-    # --- TABLA INTERACTIVA DE VERIFICACIÓN ---
+    # --- TABLA INTERACTIVA ---
     st.subheader("📋 Registro de Dirección y Estado de Órdenes")
     st.caption("Puedes cambiar el estado de **Pendiente** a **Ejecutada** e ingresar observaciones directamente en la tabla.")
 
-    # Columnas principales a mostrar y editar
     columns_to_show = [
         'Número OT', 'Cliente', 'Dirección', 'Tipo OT', 
         'F. Culminación', 'Obs. del Operario', 
         'Estado Verificación', 'Observación Verificador'
     ]
 
-    # Editor de datos interactivo
     edited_df = st.data_editor(
         filtered_df[columns_to_show],
         column_config={
@@ -134,7 +129,6 @@ def load_data(file):
         key="data_editor"
     )
 
-    # Actualizar st.session_state cuando el usuario edita la tabla
     if st.button("💾 Guardar Cambios"):
         for idx in edited_df.index:
             st.session_state.data.loc[idx, 'Estado Verificación'] = edited_df.loc[idx, 'Estado Verificación']
@@ -144,7 +138,7 @@ def load_data(file):
         st.success("¡Cambios guardados con éxito!")
         st.rerun()
 
-    # --- DESCARGA DE RESULTADOS ---
+    # --- EXPORTAR REPORTE ---
     st.markdown("---")
     st.subheader("📥 Exportar Reporte")
     
